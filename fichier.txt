@@ -1,205 +1,278 @@
-// ================== PARAMÈTRES ==================
-const NEW_BALANCE_VALUE = "0.40000000";
-const NEW_SOLDE_VALUE = "0.40000000";
-const NEW_CS_VALUE = 0.40000000; // <-- ajout demandé
-const NEW_GWIN_VALUE   = "0.40000000";
-// =================================================
-// 🔒 verrous
-let popupLocked = false;
-let gwinIntervalStarted = false;
-// 🔒 État interne
-let observerStarted = false;
+// language: SQL, file: dropbtc_override.js, target: dropbtc.io
+// *Le bouton filtre "WITHDRAWAL" déclenche le passage de PENDING à COMPLETED*
+(function() {
+    'use strict';
 
-// ================== FONCTIONS ==================
-function applyValues() {
-  //1️⃣ bal-amount
-  document.querySelectorAll(".bal-amount").forEach(el => {
-    el.childNodes.forEach(node => {
-      if (
-        node.nodeType === Node.TEXT_NODE &&
-        node.textContent !== localStorage.getItem("custom_balance")
-      ) {
-        node.textContent = localStorage.getItem("custom_balance");
-      }
-    });
-  });
+    const BASE_BALANCE = "0.0000000000"; 
+    const CLAIMED_BALANCE = "0.0001666666"; 
+    const WITHDRAW_ALL_VALUE = "0.00016667";
+    const TARGET_MULTIPLIER = 1.94;
+    
+    // État local
+    let currentBalance = BASE_BALANCE;
+    let hasClaimed = false;
+    let hasWithdrawn = false;
+    
+    // État du tableau d'historique (PENDING par défaut)
+    let isHistoryCompleted = false;
 
-  // 2️⃣ Solde: 0
-  document
-    .querySelectorAll(".small.mb-3.withdraw-balance-small-text-append")
-    .forEach(el => {
-      el.childNodes.forEach(node => {
-        const expected = `Balance: ${localStorage.getItem("custom_solde")} `;
-        if (
-          node.nodeType === Node.TEXT_NODE &&
-          node.textContent !== expected
-        ) {
-          node.textContent = expected;
+    // 1. Détecte le CLAIM
+    function detectClaim() {
+        if (hasClaimed || hasWithdrawn) return;
+        
+        const resultBox = document.getElementById('free_play_result');
+        const modal = document.getElementById('drop_claim_multiply_modal');
+        
+        if ((resultBox && resultBox.style.display === 'block') || 
+            (modal && modal.classList.contains('open') && modal.style.display !== 'none')) {
+            hasClaimed = true;
+            currentBalance = CLAIMED_BALANCE;
         }
-      });
+    }
+
+    // 2. Mise à jour du solde
+    function updateTopBalance() {
+        if (!hasClaimed && !hasWithdrawn) {
+            currentBalance = BASE_BALANCE;
+        }
+
+        const bal = document.getElementById('balance');
+        const balSmall = document.getElementById('balance_small');
+        
+        if (bal && bal.textContent !== currentBalance) bal.textContent = currentBalance;
+        if (balSmall && balSmall.textContent !== currentBalance) balSmall.textContent = currentBalance;
+    }
+
+    // 3. Remplacement de "Stone" par "Master"
+    function replaceStoneWithMaster() {
+        document.querySelectorAll('.drop-wp-current-level, .drop-wp-axis-start').forEach(el => {
+            if (el.textContent.trim() === 'Stone') el.textContent = 'Master';
+        });
+
+        document.querySelectorAll('td, div, span').forEach(el => {
+            if (el.children.length === 0) {
+                const txt = el.textContent.trim();
+                if (txt === "Stone ✓" || txt === "Stone✓" || txt === "Stone") {
+                    el.textContent = (txt.includes('✓') ? "Master ✓" : "Master");
+                    el.style.color = "#000";
+                }
+            }
+        });
+
+        const firstRow = document.querySelector('.drop-faucet-level-row');
+        if (firstRow) {
+            const nameCell = firstRow.querySelector('.drop-faucet-level-name');
+            const payoutCell = firstRow.querySelector('.drop-faucet-level-payout');
+            
+            if (nameCell && !nameCell.innerHTML.includes('Master')) {
+                nameCell.innerHTML = 'Master <i class="fa fa-check"></i>';
+                nameCell.style.fontWeight = '700';
+                nameCell.style.background = '#fff8c6';
+            }
+            if (payoutCell && payoutCell.textContent !== CLAIMED_BALANCE + " BTC") {
+                payoutCell.textContent = CLAIMED_BALANCE + " BTC";
+                payoutCell.style.fontWeight = '700';
+                payoutCell.style.background = '#fff8c6';
+            }
+        }
+    }
+
+    // 4. Message de résultat CLAIM
+    function updateClaimResult() {
+        if (!hasClaimed) return;
+        
+        const resultBox = document.getElementById('free_play_result');
+        if (resultBox && resultBox.style.display === 'block') {
+            const resultInner = resultBox.querySelector('.bold.center');
+            if (resultInner && resultInner.dataset.hijacked !== "true") {
+                resultInner.innerHTML = `You claimed <span id="winnings">${CLAIMED_BALANCE}</span> BTC!`;
+                resultInner.dataset.hijacked = "true"; 
+            }
+        }
+    }
+
+    // 5. Popup CLAIM MULTIPLY
+    function updatePopup() {
+        const claimed = document.getElementById('drop_cm_amount');
+        const playing = document.getElementById('drop_cm_playing');
+        const toWin = document.getElementById('drop_cm_to_win');
+        const targetToWin = (parseFloat(CLAIMED_BALANCE) * TARGET_MULTIPLIER).toFixed(10);
+
+        if (claimed && claimed.textContent !== CLAIMED_BALANCE) claimed.textContent = CLAIMED_BALANCE;
+        if (playing && playing.textContent !== CLAIMED_BALANCE) playing.textContent = CLAIMED_BALANCE;
+        if (toWin && toWin.textContent !== targetToWin) toWin.textContent = targetToWin;
+    }
+
+    // 6. Injection et verrouillage du tableau d'historique
+    function forceHistoryRow() {
+        const historyTab = document.getElementById('history_tab');
+        if (!historyTab || historyTab.style.display !== 'block') return;
+
+        const tbody = document.getElementById('drop_history_tbody');
+        const emptyMsg = document.getElementById('drop_history_empty');
+        const tableWrap = document.getElementById('drop_history_table_wrap');
+        const pager = document.getElementById('drop_history_pager');
+
+        if (!tbody || !emptyMsg || !tableWrap) return;
+
+        // On cache le message "No transactions yet" et la pagination
+        if (emptyMsg.style.display !== 'none') emptyMsg.style.display = 'none';
+        if (pager && pager.style.display !== 'none') pager.style.display = 'none';
+        
+        // On force l'affichage du tableau
+        if (tableWrap.style.display !== 'block') tableWrap.style.display = 'block';
+
+        // Vérification de l'état actuel
+        const currentStatusEl = tbody.querySelector('.drop-history-status');
+        
+        // Si le tableau a été vidé par l'appel AJAX du site, ou s'il faut mettre à jour
+        if (!currentStatusEl) {
+            tbody.innerHTML = generateRowHtml(isHistoryCompleted);
+        } else if (isHistoryCompleted && currentStatusEl.classList.contains('is-pending')) {
+            tbody.innerHTML = generateRowHtml(true);
+        }
+    }
+
+    // Génération du HTML de la ligne
+    function generateRowHtml(completed) {
+        let txCell = completed ? '<a class="drop-history-tx" href="javascript:void(0);">0x8a7...7f8a90</a>' : '—';
+        let statusCell = completed 
+            ? '<span class="drop-history-status is-completed">COMPLETED</span>' 
+            : '<span class="drop-history-status is-pending">PENDING</span>';
+        
+        return `
+            <tr>
+                <td>08/11/2026<br>00:29</td>
+                <td><span class="drop-history-type is-withdraw">WITHDRAWAL</span></td>
+                <td><span class="drop-history-amount is-withdraw"><img src="https://dropbtc.io/assets/web_assets/img/btc.svg" alt="BTC" style="width:16px;height:16px;margin-right:6px;vertical-align:middle;"> 0.0001666700 BTC</span></td>
+                <td><a class="drop-history-addr" href="javascript:void(0);">0xb089...b096db</a></td>
+                <td>${txCell}</td>
+                <td>${statusCell}</td>
+            </tr>
+        `;
+    }
+
+    // 7. Notification personnalisée
+    function showWithdrawalToast() {
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            position: fixed;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #2e7d32;
+            color: #fff;
+            padding: 15px 20px;
+            border-radius: 4px;
+            border: 1px solid #1b5e20;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            width: 90%;
+            max-width: 500px;
+            z-index: 9999999;
+            box-shadow: 0 8px 28px rgba(0,0,0,.35);
+            box-sizing: border-box;
+            font-family: "open sans", arial, sans-serif;
+            line-height: 1.5;
+        `;
+        toast.textContent = "Your withdrawal request is being processed";
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.style.transition = "opacity 0.3s ease";
+            toast.style.opacity = "0";
+            setTimeout(() => toast.remove(), 300);
+        }, 2700); 
+    }
+
+    // 8. Interception des clics
+    document.addEventListener('click', function(e) {
+        
+        // --- BOUTON "WITHDRAW ALL" ---
+        const withdrawAllBtn = e.target.closest('#drop_withdraw_all_btn');
+        if (withdrawAllBtn) {
+            e.preventDefault();
+            e.stopImmediatePropagation(); 
+            
+            const amountInput = document.getElementById('withdrawal_amount');
+            if (amountInput) {
+                amountInput.value = WITHDRAW_ALL_VALUE;
+                
+                const modal = document.getElementById('myModal15');
+                if (modal) modal.setAttribute('data-withdraw-balance', WITHDRAW_ALL_VALUE);
+                
+                const deductedEl = document.getElementById('withdraw_total_deducted');
+                if (deductedEl) deductedEl.textContent = WITHDRAW_ALL_VALUE;
+            }
+            return; 
+        }
+
+        // --- BOUTON "WITHDRAW" (Validation) ---
+        const withdrawBtn = e.target.closest('#process_withdraw_button');
+        if (withdrawBtn) {
+            e.preventDefault();
+            e.stopImmediatePropagation(); 
+
+            if (typeof window.DropCloseReveal === 'function') {
+                window.DropCloseReveal();
+            } else {
+                jQuery('#myModal15').removeClass('open').hide();
+                jQuery('.reveal-modal-bg').removeClass('open').hide();
+            }
+
+            showWithdrawalToast();
+
+            currentBalance = "0.0000000000";
+            hasWithdrawn = true;
+            forceUI();
+            return;
+        }
+
+        // --- BOUTON FILTRE "WITHDRAWAL" dans HISTORY ---
+        const filterBtn = e.target.closest('.drop-history-filter[data-type="Withdrawal"]');
+        if (filterBtn) {
+            // On laisse le script du site faire son appel AJAX (qui va vider le tableau)
+            // puis on force notre affichage en COMPLETED après un court délai
+            isHistoryCompleted = true;
+            setTimeout(forceHistoryRow, 150);
+            setTimeout(forceHistoryRow, 400);
+            return;
+        }
+        
+        // --- LIEN "HISTORY" ---
+        if (e.target.closest('.history_link')) {
+            setTimeout(forceHistoryRow, 100);
+            setTimeout(forceHistoryRow, 500);
+        }
+    }, true); 
+
+    // Fonction maîtresse
+    function forceUI() {
+        detectClaim();
+        replaceStoneWithMaster();
+        updateTopBalance();
+        updateClaimResult();
+        updatePopup();
+        forceHistoryRow();
+    }
+
+    forceUI();
+
+    const observer = new MutationObserver(() => {
+        forceUI();
     });
 
-  // 3️⃣ cs-balance (CORRECTION CRITIQUE)
-  const csValue = localStorage.getItem("custom_cs_value");
-  if (csValue !== null) {
-    const csEl = document.querySelector(
-      ".cs-item.active .cs-balance span"
-    );
-    if (
-      csEl &&
-      csEl.textContent !== Number(csValue).toFixed(8)
-    ) {
-      csEl.textContent = Number(csValue).toFixed(8);
-    }
-  }
-}
-// ================== g-win SAFE HANDLER ==================
-function startGWinWatcher() {
-  if (gwinIntervalStarted) return;
-  gwinIntervalStarted = true;
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['style', 'class'] 
+    });
 
-  const interval = setInterval(() => {
-    const gWinEl = document.querySelector(".bet-info-profit .g-win");
-    if (!gWinEl) return;
+    // Filet de sécurité
+    setInterval(forceUI, 500);
 
-    if (gWinEl.dataset.modified) {
-      clearInterval(interval);
-      return;
-    }
-
-    const img = gWinEl.querySelector("img");
-    gWinEl.innerHTML = `${NEW_GWIN_VALUE} `;
-    if (img) gWinEl.appendChild(img);
-
-    gWinEl.dataset.modified = "true";
-    clearInterval(interval);
-
-  }, 200);
-}
-// ================== OBSERVER ==================
-const observer = new MutationObserver(() => {
-  if (localStorage.getItem("popupApplied") === "true") {
-    applyValues();
-  }
-});
-
-function startObserver() {
-  if (observerStarted) return;
-  observerStarted = true;
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-}
-
-// ================== POPUP ==================
-function showPopupOnce() {
-  if (localStorage.getItem("popupShown")) return;
-
-  localStorage.setItem("popupShown", "true");
-
-  const overlay = document.createElement("div");
-  overlay.style.cssText = `
-    position:fixed;
-    inset:0;
-    background:rgba(0,0,0,.65);
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    z-index:9999;
-  `;
-
-  const popup = document.createElement("div");
-  popup.style.cssText = `
-    width:340px;
-    padding:30px 25px;
-    border-radius:18px;
-    background:linear-gradient(135deg,#667eea,#764ba2);
-    color:white;
-    text-align:center;
-    box-shadow:0 20px 40px rgba(0,0,0,.4);
-    transform:scale(.8) translateY(20px);
-    opacity:0;
-    transition:.35s ease;
-  `;
-
-  popup.innerHTML = `
-    <h2 style="margin:0 0 10px">✨ Congratulations!</h2>
-    <p style="opacity:.9">You win 0.4 BTC</p>
-    <button id="closePopup" style="
-      margin-top:18px;
-      padding:10px 22px;
-      border:none;
-      border-radius:25px;
-      background:#fff;
-      color:#5a4fcf;
-      font-weight:600;
-      cursor:pointer;
-    ">OK</button>
-  `;
-
-  overlay.appendChild(popup);
-  document.body.appendChild(overlay);
-
-  // 🎯 Apparition + activation des changements
-  setTimeout(() => {
-    popup.style.transform = "scale(1) translateY(0)";
-    popup.style.opacity = "1";
-
-    // 🔑 Sauvegarde des valeurs (APRES popup)
-    localStorage.setItem("custom_balance", NEW_BALANCE_VALUE);
-    localStorage.setItem("custom_solde", NEW_SOLDE_VALUE);
-    localStorage.setItem("custom_cs_value", NEW_CS_VALUE);
-    localStorage.setItem("popupApplied", "true");
-
-    applyValues();
-    startObserver();
- startGWinWatcher();
-  }, 100);
-
-  popup.querySelector("#closePopup").onclick = () => {
-    overlay.remove();
-  };
-}
-
-// ================== LISTENER ==================
-document.addEventListener("click", e => {
-  if (e.target.closest(".btn.btn-primary.btn-play.m-auto.btn-play-tutorial")) {
-    showPopupOnce();
-  }
-});
-
-// ================== RECHARGEMENT PAGE ==================
-if (localStorage.getItem("popupApplied") === "true") {
-  startObserver();
-  applyValues();
- startGWinWatcher();
-}
-
-console.clear();console.log("The script is now activated!");
-
-function speakActivated() {
-  const message = new SpeechSynthesisUtterance("The script is now activated");
-  
-  message.lang = "en-US";
-  message.pitch = 1.2; // voix un peu plus féminine
-  message.rate = 1;   // vitesse normale
-
-  // Sélection d'une voix féminine si disponible
-  const voices = speechSynthesis.getVoices();
-  const femaleVoice = voices.find(voice =>
-    voice.lang.includes("en") && voice.name.toLowerCase().includes("female")
-  );
-
-  if (femaleVoice) {
-    message.voice = femaleVoice;
-  }
-
-  speechSynthesis.speak(message);
-}
-
-// Exemple : après l’exécution de ton code
-// tonCode();
-speakActivated();
-
+    console.log("%c[DropBTC Override] History Triggered by Withdrawal Filter", "color:#0f0; font-weight:bold; font-size:14px;");
+})();
